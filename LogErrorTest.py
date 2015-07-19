@@ -26,6 +26,35 @@ def MLE_BF(x_arr, y_arr, z_arr, r_arr, v_arr, sigma_n, sigmastar2):
     u = np.dot(Aij_inv,rsum)
     return u
 
+def MV_BF_6dFGSv(v_arr):
+    # ----------------- Read in MV bulk flow weights -------------------
+    wfile = '/Users/Morag/6dFGS/6dFGS_BF/Constraints/resultsJul2014/weights_6dFGSv_RI50_DW_cutoff_equatorial_sigstar250.dat'
+    wx = []
+    wy = []
+    wz = []
+    f = open(wfile,'r')
+    for line in f:
+        if not line.startswith('#'):
+            p = line.split()
+            wx.append(float(p[0]))
+            wy.append(float(p[1]))
+            wz.append(float(p[2]))
+    f.close()
+    Ux = sum(wx*v_arr)
+    Uy = sum(wy*v_arr)
+    Uz = sum(wz*v_arr)
+    return np.array([Ux,Uy,Uz])
+
+def getDec(x, y, z):
+    r = np.sqrt(x**2 + y**2 + z**2)
+    Dec = 90. - np.arccos(z/r) * 180. / np.pi
+    return Dec
+
+def meanVector(tuplelist):
+    meanvec = [np.mean(y) for y in zip(*tuplelist)]
+    stdvec = [np.std(y) for y in zip(*tuplelist)]
+    return meanvec, stdvec
+
 def readin6dFGSvData():
 
     # -------------------- Read in 6dFGSv data ----------------------
@@ -72,7 +101,7 @@ def readin6dFGSvData():
     xobs = np.array(xobs)
     r_arr = np.sqrt(x_arr**2 + y_arr**2 + z_arr**2)
 
-	return Dz, xerr, x_arr, y_arr, z_arr, xobs, r_arr
+    return Dz, xerr, x_arr, y_arr, z_arr, xobs, r_arr, ngal
 
 def zeroVelocityMocks():
 
@@ -80,7 +109,15 @@ def zeroVelocityMocks():
 
     # -------------------- Read in 6dFGSv data ----------------------
 
-    Dz, xerr, x_arr, y_arr, z_arr, xobs, r_arr = readin6dFGSvData()
+    Dz, xerr, x_arr, y_arr, z_arr, xobs, r_arr, ngal = readin6dFGSvData()
+
+    # Calculate velocity uncertainties sigma_v from Eq. (10) of Scrimgeour et al. (2015)
+    sigma_v = 0.324 * 100. * Dz
+
+    # Calculate Dec (np array)
+    Dec = getDec(x_arr, y_arr, z_arr)
+    # Index of galaxies in Great Circle. 
+    inC = np.where(Dec > -20.)[0]
 
     #---------------------- Convert Dz to z -------------------------   
 
@@ -91,22 +128,40 @@ def zeroVelocityMocks():
     # Give all galaxies v=0 but perturb x by xerr
     # Generate array of num random deltax values with std dev = xerr[gal]
     
-    meanx = xerr*np.random.standard_normal(ngal)
+    BFArr = [] 
 
-    # Calculate derived Dr
-    Dr_der = Dz / 10**meanx
+    for i in xrange(100):
+        print i
 
-    # Calculate new derived redshifts
-    zr_der = cc.z_x_arr(Dr_der, zfile)
+        x = xerr*np.random.standard_normal(ngal)
 
-    vp_rand = speedlight * ((zo - zr_der)/(1.+zr_der))
-    sigma_v = 0.324 * 100. * Dz
+        ## Calibrate zeropoint to 0
+        # Mean x in Great Circle
+        #meanx = np.mean(x[inC])
+        # Subtract this from all galaxies
+        #x -= meanx
 
-    #------------------------- Calculate BF ---------------------------
+        # Calculate derived Dr
+        Dr_der = Dz / 10**x
 
-    u = MLE_BF(x_arr, y_arr, z_arr, r_arr, vp_rand, sigma_v, sigmastar2)
+        # Calculate new derived redshifts
+        zr_der = cc.z_x_arr(Dr_der, zfile)
 
-    print u
+        vp_rand = speedlight * ((zo - zr_der)/(1.+zr_der))
+        
+
+        #------------------------- Calculate BF ---------------------------
+
+        #u = MLE_BF(x_arr, y_arr, z_arr, r_arr, vp_rand, sigma_v, sigmastar2)
+        u = MV_BF_6dFGSv(vp_rand)
+        BFArr.append((u[0],u[1],u[2]))
+
+    print ''
+
+    meanBF, stdBF = meanVector(BFArr)
+    print 'Mean spurious BF: (%d pm %d, %d pm %d, %d pm %d)' %  (meanBF[0], stdBF[0], 
+                                                                 meanBF[1], stdBF[1], 
+                                                                 meanBF[2], stdBF[2])
 
     return
 
